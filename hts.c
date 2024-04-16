@@ -1129,10 +1129,25 @@ int hts_opt_add(hts_opt **opts, const char *c_arg) {
     else if (strcmp(o->arg, "use_zstd") == 0 ||
              strcmp(o->arg, "USE_ZSTD") == 0)
         o->opt = CRAM_OPT_USE_ZSTD, o->val.i = atoi(val);
+    
+    else if (strcmp(o->arg, "zstd_bases_dict") == 0 ||
+             strcmp(o->arg, "ZSTD_BASES_DICT") == 0)
+        o->opt = CRAM_OPT_BASES_ZSTD_DICTIONARY, o->val.s = val;
 
-    else if (strcmp(o->arg, "zstd_dictionary") == 0 ||
-             strcmp(o->arg, "ZSTD_DICTIONARY") == 0)
-        o->opt = CRAM_OPT_ZSTD_DICTIONARY, o->val.s = val;
+    // names
+    else if (strcmp(o->arg, "zstd_names_dict") == 0 ||
+             strcmp(o->arg, "ZSTD_NAMES_DICT") == 0)
+        o->opt = CRAM_OPT_NAMES_ZSTD_DICTIONARY, o->val.s = val;
+
+    // QUAL
+    else if (strcmp(o->arg, "zstd_qual_dict") == 0 ||
+             strcmp(o->arg, "ZSTD_QUAL_DICT") == 0)
+        o->opt = CRAM_OPT_QUAL_ZSTD_DICTIONARY, o->val.s = val;
+
+    // soft clip
+    else if (strcmp(o->arg, "zstd_soft_clip_dict") == 0 ||
+             strcmp(o->arg, "ZSTD_SOFT_CLIP_DICT") == 0)
+        o->opt = CRAM_OPT_SOFT_CLIP_ZSTD_DICTIONARY, o->val.s = val;
 
     else if (strcmp(o->arg, "use_rans") == 0 ||
              strcmp(o->arg, "USE_RANS") == 0)
@@ -1298,7 +1313,11 @@ int hts_opt_apply(htsFile *fp, hts_opt *opts) {
             case CRAM_OPT_VERSION:
             case CRAM_OPT_PREFIX:
             case HTS_OPT_FILTER:
-            case CRAM_OPT_ZSTD_DICTIONARY:
+            //case CRAM_OPT_ZSTD_DICTIONARY:
+            case CRAM_OPT_BASES_ZSTD_DICTIONARY:
+            case CRAM_OPT_NAMES_ZSTD_DICTIONARY:
+            case CRAM_OPT_QUAL_ZSTD_DICTIONARY:
+            case CRAM_OPT_SOFT_CLIP_ZSTD_DICTIONARY:
             case FASTQ_OPT_AUX:
             case FASTQ_OPT_BARCODE:
                 if (hts_set_opt(fp,  opts->opt,  opts->val.s) != 0)

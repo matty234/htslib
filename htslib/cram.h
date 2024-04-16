@@ -141,6 +141,16 @@ enum cram_content_type {
     CORE               = 5,
 };
 
+enum cram_inner_content {
+    CRAM_INNER_CONTENT_SEQUENCE = 0,
+    CRAM_INNER_CONTENT_QUALITY_SCORES = 1,
+    CRAM_INNER_CONTENT_NAMES = 2,
+    CRAM_INNER_CONTENT_BLK = 3,
+    CRAM_INNER_CONTENT_BASE = 4,
+    CRAM_INNER_CONTENT_SOFT_CLIP = 5,
+    CRAM_INNER_CONTENT_OTHER = 6,
+};
+
 // Opaque data types, see cram_structs for the fully fledged versions.
 typedef struct cram_file_def cram_file_def;
 typedef struct cram_fd cram_fd;
