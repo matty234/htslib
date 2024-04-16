@@ -150,8 +150,8 @@ LIBHTS_SOVERSION = 3
 # is not strictly necessary and should be removed the next time
 # LIBHTS_SOVERSION is bumped (see #1144 and
 # https://developer.apple.com/library/archive/documentation/DeveloperTools/Conceptual/DynamicLibraries/100-Articles/DynamicLibraryDesignGuidelines.html#//apple_ref/doc/uid/TP40002013-SW23)
-MACH_O_COMPATIBILITY_VERSION = 3.1.19
-MACH_O_CURRENT_VERSION = 3.1.19
+MACH_O_COMPATIBILITY_VERSION = 3.1.20
+MACH_O_CURRENT_VERSION = 3.1.20
 
 # Force version.h to be remade if $(PACKAGE_VERSION) has changed.
 version.h: $(if $(wildcard version.h),$(if $(findstring "$(PACKAGE_VERSION)",$(shell cat version.h)),,force))
@@ -221,6 +221,7 @@ LIBHTS_OBJS = \
 	cram/cram_encode.o \
 	cram/cram_external.o \
 	cram/cram_index.o \
+	cram/zstd_dict.o \
 	cram/cram_io.o \
 	cram/cram_stats.o \
 	cram/mFILE.o \
@@ -238,13 +239,14 @@ NONCONFIGURE_OBJS = hfile_libcurl.o
 PLUGIN_EXT  =
 PLUGIN_OBJS =
 
-cram_h = cram/cram.h $(cram_samtools_h) $(header_h) $(cram_structs_h) $(cram_io_h) cram/cram_encode.h cram/cram_decode.h cram/cram_stats.h cram/cram_codecs.h cram/cram_index.h $(htslib_cram_h)
+cram_h = cram/cram.h $(cram_samtools_h) $(header_h) $(cram_structs_h) $(cram_io_h) cram/cram_encode.h cram/cram_decode.h cram/cram_stats.h cram/cram_codecs.h cram/cram_index.h cram/zstd_dict.h $(htslib_cram_h)
 cram_io_h = cram/cram_io.h $(cram_misc_h)
 cram_misc_h = cram/misc.h
 cram_os_h = cram/os.h $(htslib_hts_endian_h)
 cram_samtools_h = cram/cram_samtools.h $(htslib_sam_h)
 cram_structs_h = cram/cram_structs.h $(htslib_thread_pool_h) $(htslib_cram_h) cram/string_alloc.h cram/mFILE.h $(htslib_khash_h)
 cram_open_trace_file_h = cram/open_trace_file.h cram/mFILE.h
+zstd_dict_h = cram/zstd_dict.h 
 bcf_sr_sort_h = bcf_sr_sort.h $(htslib_synced_bcf_reader_h) $(htslib_kbitset_h)
 fuzz_settings_h = fuzz_settings.h
 header_h = header.h cram/string_alloc.h cram/pooled_alloc.h $(htslib_khash_h) $(htslib_kstring_h) $(htslib_sam_h)
@@ -473,7 +475,8 @@ cram/cram_decode.o cram/cram_decode.pico: cram/cram_decode.c config.h $(cram_h) 
 cram/cram_encode.o cram/cram_encode.pico: cram/cram_encode.c config.h $(cram_h) $(cram_os_h) $(sam_internal_h) $(htslib_hts_h) $(htslib_hts_endian_h) $(textutils_internal_h)
 cram/cram_external.o cram/cram_external.pico: cram/cram_external.c config.h $(htscodecs_rANS_static4x16_h) $(htslib_hfile_h) $(cram_h)
 cram/cram_index.o cram/cram_index.pico: cram/cram_index.c config.h $(htslib_bgzf_h) $(htslib_hfile_h) $(hts_internal_h) $(cram_h) $(cram_os_h)
-cram/cram_io.o cram/cram_io.pico: cram/cram_io.c config.h os/lzma_stub.h $(fuzz_settings_h) $(cram_h) $(cram_os_h) $(htslib_hts_h) $(cram_open_trace_file_h) $(htscodecs_rANS_static_h) $(htscodecs_rANS_static4x16_h) $(htscodecs_arith_dynamic_h) $(htscodecs_tokenise_name3_h) $(htscodecs_fqzcomp_qual_h) $(htscodecs_varint_h) $(htslib_hfile_h) $(htslib_bgzf_h) $(htslib_faidx_h) $(hts_internal_h)
+cram/zstd_dict.o cram/zstd_dict.pico: cram/zstd_dict.c config.h  $(cram_h) $(cram_os_h) $(sam_internal_h) $(htslib_hts_h) $(htslib_hts_endian_h) $(textutils_internal_h)
+cram/cram_io.o cram/cram_io.pico: cram/cram_io.c config.h os/lzma_stub.h $(fuzz_settings_h) $(cram_h) $(cram_os_h) $(htslib_hts_h) $(cram_open_trace_file_h) $(htscodecs_rANS_static_h) $(htscodecs_rANS_static4x16_h) $(htscodecs_arith_dynamic_h) $(htscodecs_tokenise_name3_h) $(htscodecs_fqzcomp_qual_h) $(htscodecs_varint_h) $(htslib_hfile_h) $(htslib_bgzf_h) $(htslib_faidx_h) $(hts_internal_h) $(zstd_dict_h)
 cram/cram_stats.o cram/cram_stats.pico: cram/cram_stats.c config.h $(cram_h) $(cram_os_h)
 cram/mFILE.o cram/mFILE.pico: cram/mFILE.c config.h $(htslib_hts_log_h) $(cram_os_h) cram/mFILE.h
 cram/open_trace_file.o cram/open_trace_file.pico: cram/open_trace_file.c config.h $(cram_os_h) $(cram_open_trace_file_h) $(cram_misc_h) $(htslib_hfile_h) $(htslib_hts_log_h) $(htslib_hts_h)

@@ -1409,7 +1409,6 @@ static char *zstd_mem_inflate(char *cdata, size_t csize, size_t *size) {
     data = malloc(dst_capacity);
     if (!data) {
         hts_log_error("Memory allocation failure");
-        ZSTD_freeDCtx(zstd_dctx);
         return NULL;
     }
 
@@ -1428,11 +1427,11 @@ static char *zstd_mem_inflate(char *cdata, size_t csize, size_t *size) {
 static char *zstd_mem_deflate(char *data, size_t size, size_t *cdata_size,
                               int level, enum cram_inner_content content_type) {
 
-    /*int add_example_err = add_example(content_type, data, size);
+    int add_example_err = add_example(content_type, data, size);
     if (add_example_err == -1) {
         hts_log_error("Failed to add example data for ZSTD compression");
-        //return NULL;
-    }*/
+        return NULL;
+    }
 
     if (zstd_cctx == NULL || zstd_cctx_bases == NULL || zstd_cctx_names == NULL || zstd_cctx_qual == NULL || zstd_cctx_soft_clip == NULL) {
         hts_log_error("ZSTD compression context not initialized");
