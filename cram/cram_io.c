@@ -124,8 +124,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define CRAM_DEFAULT_LEVEL 5
 
 #ifdef HAVE_LIBZSTD
-
+#include "zstd_dict.h"
 ZSTD_CCtx* zstd_cctx = NULL;
+ZSTD_CCtx* zstd_cctx_bases = NULL;
+ZSTD_CCtx* zstd_cctx_names = NULL;
+ZSTD_CCtx* zstd_cctx_qual = NULL;
+ZSTD_CCtx* zstd_cctx_soft_clip = NULL;
 ZSTD_DCtx* zstd_dctx = NULL;
 
 #endif
@@ -1293,13 +1297,41 @@ static char *zlib_mem_deflate(char *data, size_t size, size_t *cdata_size,
  * Zstd compression 
  */
 
-static int init_zstd(char* dict) {
+static int load_dict_from_file(const char *dict, ZSTD_CCtx *zstd_cctx) {
+    FILE *dictFile = fopen(dict, "r");
+    if (dictFile == NULL) {
+        hts_log_error("Failed to open dictionary file %s", dict);
+        return -1;
+    }
+
+    fseek(dictFile, 0, SEEK_END);
+    size_t dictSize = ftell(dictFile);
+    fseek(dictFile, 0, SEEK_SET);
+
+    void* dictBuffer = malloc(dictSize);
+    fread(dictBuffer, 1, dictSize, dictFile);
+    fclose(dictFile);
+
+    size_t const loadDictResult = ZSTD_CCtx_loadDictionary(zstd_cctx, dictBuffer, dictSize);
+    if (ZSTD_isError(loadDictResult)) {
+        hts_log_error("ZSTD dictionary loading failed: %s", ZSTD_getErrorName(loadDictResult));
+        return -1;
+    }
+
+    hts_log_info("Dictionary loaded from %s", dict);
+    return 0;
+}
+
+
+static int init_zstd(zstd_dicts *dicts) {
+
+    initialize_example_arrays();
+
     zstd_dctx = ZSTD_createDCtx();
     if (!zstd_dctx) {
         hts_log_error("Call to ZSTD_createDCtx failed");
         return -1;
     }
-
 
     zstd_cctx = ZSTD_createCCtx();
     if (!zstd_cctx) {
@@ -1307,36 +1339,63 @@ static int init_zstd(char* dict) {
         return -1;
     }
 
-    if (dict != NULL) {
-        FILE *dictFile = fopen(dict, "r");
-        if (dictFile == NULL) {
-            fprintf(stderr, "Failed to open dictionary file %s\n", dict);
-            return -1;
-        }
-
-        fseek(dictFile, 0, SEEK_END);
-        size_t dictSize = ftell(dictFile);
-        fseek(dictFile, 0, SEEK_SET);
-
-        void* dictBuffer = malloc(dictSize);
-        fread(dictBuffer, 1, dictSize, dictFile);
-        fclose(dictFile);
-
-
-        size_t const loadDictResult = ZSTD_CCtx_loadDictionary(zstd_cctx, dictBuffer, dictSize);
-        if (ZSTD_isError(loadDictResult)) {
-            hts_log_error("ZSTD dictionary loading failed: %s", ZSTD_getErrorName(loadDictResult));
-            return -1;
-        }
-
-        hts_log_info("Dictionary loaded from %s", dict);
+    zstd_cctx_bases = ZSTD_createCCtx();
+    if (!zstd_cctx_bases) {
+        hts_log_error("Call to ZSTD_createCCtx failed");
+        return -1;
     }
+
+    zstd_cctx_names = ZSTD_createCCtx();
+    if (!zstd_cctx_names) {
+        hts_log_error("Call to ZSTD_createCCtx failed");
+        return -1;
+    }
+
+    zstd_cctx_qual = ZSTD_createCCtx();
+    if (!zstd_cctx_qual) {
+        hts_log_error("Call to ZSTD_createCCtx failed");
+        return -1;
+    }
+
+    zstd_cctx_soft_clip = ZSTD_createCCtx();
+    if (!zstd_cctx_soft_clip) {
+        hts_log_error("Call to ZSTD_createCCtx failed");
+        return -1;
+    }
+
+    if (dicts != NULL) {
+        if (dicts->bases != NULL) {
+            if (load_dict_from_file(dicts->bases, zstd_cctx_bases) != 0) {
+                return -1;
+            }
+        }
+
+        if (dicts->names != NULL) {
+            if (load_dict_from_file(dicts->names, zstd_cctx_names) != 0) {
+                return -1;
+            }
+        }
+
+        if (dicts->qual != NULL) {
+            if (load_dict_from_file(dicts->qual, zstd_cctx_qual) != 0) {
+                return -1;
+            }
+        }
+
+        if (dicts->soft_clip != NULL) {
+            if (load_dict_from_file(dicts->soft_clip, zstd_cctx_soft_clip) != 0) {
+                return -1;
+            }
+        }
+    }
+
+    
+
 
     return 0;
 }
 
 static char *zstd_mem_inflate(char *cdata, size_t csize, size_t *size) {
-
     if (zstd_dctx == NULL) {
         if (init_zstd(NULL) != 0) {
             return NULL;
@@ -1350,7 +1409,6 @@ static char *zstd_mem_inflate(char *cdata, size_t csize, size_t *size) {
     data = malloc(dst_capacity);
     if (!data) {
         hts_log_error("Memory allocation failure");
-        ZSTD_freeDCtx(zstd_dctx);
         return NULL;
     }
 
@@ -1358,7 +1416,6 @@ static char *zstd_mem_inflate(char *cdata, size_t csize, size_t *size) {
     if (ZSTD_isError(ret)) {
         hts_log_error("ZSTD decompression failed: %s", ZSTD_getErrorName(ret));
         free(data);
-        ZSTD_freeDCtx(zstd_dctx);
         return NULL;
     }
 
@@ -1368,13 +1425,18 @@ static char *zstd_mem_inflate(char *cdata, size_t csize, size_t *size) {
 }
 
 static char *zstd_mem_deflate(char *data, size_t size, size_t *cdata_size,
-                              int level) {
-    if (zstd_cctx == NULL) {
-        if (init_zstd(NULL) != 0) {
-            return NULL;
-        }
+                              int level, enum cram_inner_content content_type) {
+
+    int add_example_err = add_example(content_type, data, size);
+    if (add_example_err == -1) {
+        hts_log_error("Failed to add example data for ZSTD compression");
+        return NULL;
     }
 
+    if (zstd_cctx == NULL || zstd_cctx_bases == NULL || zstd_cctx_names == NULL || zstd_cctx_qual == NULL || zstd_cctx_soft_clip == NULL) {
+        hts_log_error("ZSTD compression context not initialized");
+        return NULL;
+    }
 
     size_t cdata_capacity = ZSTD_compressBound(size);
     char *cdata = NULL;
@@ -1386,11 +1448,31 @@ static char *zstd_mem_deflate(char *data, size_t size, size_t *cdata_size,
         return NULL;
     }
 
-    ret = ZSTD_compressCCtx(zstd_cctx, cdata, cdata_capacity, data, size, level);
+    /*ret = ZSTD_compressCCtx(zstd_cctx, cdata, cdata_capacity, data, size, level);
     if (ZSTD_isError(ret)) {
         hts_log_error("ZSTD compression failed: %s", ZSTD_getErrorName(ret));
         free(cdata);
         return NULL;
+    }*/
+
+    switch (content_type)
+    {
+    case CRAM_INNER_CONTENT_BASE:
+        ret = ZSTD_compressCCtx(zstd_cctx_bases, cdata, cdata_capacity, data, size, level);
+        break;
+    case CRAM_INNER_CONTENT_NAMES:
+        ret = ZSTD_compressCCtx(zstd_cctx_names, cdata, cdata_capacity, data, size, level);
+        break;
+    case CRAM_INNER_CONTENT_QUALITY_SCORES:
+        ret = ZSTD_compressCCtx(zstd_cctx_qual, cdata, cdata_capacity, data, size, level);
+        break;
+    case CRAM_INNER_CONTENT_SOFT_CLIP:
+        ret = ZSTD_compressCCtx(zstd_cctx_soft_clip, cdata, cdata_capacity, data, size, level);
+        break;
+
+    default:
+        ret = ZSTD_compressCCtx(zstd_cctx, cdata, cdata_capacity, data, size, level);
+        break;
     }
 
     *cdata_size = ret;
@@ -1500,15 +1582,10 @@ static char *lzma_mem_inflate(char *cdata, size_t csize, size_t *size) {
  * CRAM extension of content types and IDs.
  */
 
-/*
- * Allocates a new cram_block structure with a specified content_type and
- * id.
- *
- * Returns block pointer on success
- *         NULL on failure
- */
-cram_block *cram_new_block(enum cram_content_type content_type,
-                           int content_id) {
+
+
+cram_block *cram_new_block2(enum cram_content_type content_type,
+                           int content_id, enum cram_inner_content inner_content_type) {
     cram_block *b = malloc(sizeof(*b));
     if (!b)
         return NULL;
@@ -1524,9 +1601,23 @@ cram_block *cram_new_block(enum cram_content_type content_type,
     b->crc32 = 0;
     b->idx = 0;
     b->m = NULL;
-
+    b->inner_content_type = inner_content_type;
     return b;
 }
+
+/*
+ * Allocates a new cram_block structure with a specified content_type and
+ * id.
+ *
+ * Returns block pointer on success
+ *         NULL on failure
+ */
+cram_block *cram_new_block(enum cram_content_type content_type,
+                           int content_id) {
+    return cram_new_block2(content_type, content_id, CRAM_INNER_CONTENT_OTHER);
+}
+
+
 
 /*
  * Reads a block from a cram file.
@@ -1897,7 +1988,7 @@ int cram_uncompress_block(cram_block *b) {
 static char *cram_compress_by_method(cram_slice *s, char *in, size_t in_size,
                                      int content_id, size_t *out_size,
                                      enum cram_block_method_int method,
-                                     int level, int strat) {
+                                     int level, int strat, enum cram_inner_content inner_content) {
     switch (method) {
     case GZIP:
     case GZIP_RLE:
@@ -1922,8 +2013,8 @@ static char *cram_compress_by_method(cram_slice *s, char *in, size_t in_size,
 // for zstd, we use the zstd_mem_compress function
 #ifdef HAVE_LIBZSTD
     case ZSTD:
-        
-        return zstd_mem_deflate(in, in_size, out_size, level);
+        // add to training here TODO
+        return zstd_mem_deflate(in, in_size, out_size, level, inner_content);
 
 #endif
 
@@ -2116,7 +2207,7 @@ int cram_compress_block2(cram_fd *fd, cram_slice *s,
 #ifdef HAVE_LIBZSTD
     if (!zstd_cctx && method & (1<<ZSTD)) {
         // get zstd ready to go with the correct zstd dictionary
-        if (init_zstd(fd->zstd_dict) != 0) {
+        if (init_zstd(fd->dicts) != 0) {
             hts_log_error("Failed to initialise zstd");
             return -1;
         }
@@ -2233,8 +2324,10 @@ int cram_compress_block2(cram_fd *fd, cram_slice *s,
                     default:       strat = 0;
                     }
 
+                    
+
                     c = cram_compress_by_method(s, (char *)b->data, b->uncomp_size,
-                                                b->content_id, &sz[m], m, lvl, strat);
+                                                b->content_id, &sz[m], m, lvl, strat, b->inner_content_type);
 
                     if (c && sz_best > sz[m]) {
                         sz_best = sz[m];
@@ -2412,7 +2505,7 @@ int cram_compress_block2(cram_fd *fd, cram_slice *s,
             comp = cram_compress_by_method(s, (char *)b->data, b->uncomp_size,
                                            b->content_id, &comp_size, method,
                                            method == GZIP_1 ? 1 : level,
-                                           strat);
+                                           strat, b->inner_content_type);
             if (!comp)
                 return -1;
 
@@ -2429,7 +2522,7 @@ int cram_compress_block2(cram_fd *fd, cram_slice *s,
     } else {
         // no cached metrics, so just do zlib?
         comp = cram_compress_by_method(s, (char *)b->data, b->uncomp_size,
-                                       b->content_id, &comp_size, GZIP, level, Z_FILTERED);
+                                       b->content_id, &comp_size, GZIP, level, Z_FILTERED, b->inner_content_type);
         if (!comp) {
             hts_log_error("Compression failed!");
             return -1;
@@ -4505,7 +4598,7 @@ cram_block_compression_hdr *cram_new_compression_header(void) {
     if (!hdr)
         return NULL;
 
-    if (!(hdr->TD_blk = cram_new_block(CORE, 0))) {
+    if (!(hdr->TD_blk = cram_new_block2(CORE, 0, CRAM_INNER_CONTENT_OTHER))) {
         free(hdr);
         return NULL;
     }
@@ -4692,12 +4785,12 @@ cram_slice *cram_new_slice(enum cram_content_type type, int nrecs) {
     if (!(s->cigar = malloc(s->cigar_alloc * sizeof(*s->cigar)))) goto err;
     s->ncigar = 0;
 
-    if (!(s->seqs_blk = cram_new_block(EXTERNAL, 0)))       goto err;
-    if (!(s->qual_blk = cram_new_block(EXTERNAL, DS_QS)))   goto err;
-    if (!(s->name_blk = cram_new_block(EXTERNAL, DS_RN)))   goto err;
-    if (!(s->aux_blk  = cram_new_block(EXTERNAL, DS_aux)))  goto err;
-    if (!(s->base_blk = cram_new_block(EXTERNAL, DS_IN)))   goto err;
-    if (!(s->soft_blk = cram_new_block(EXTERNAL, DS_SC)))   goto err;
+    if (!(s->seqs_blk = cram_new_block2(EXTERNAL, 0, CRAM_INNER_CONTENT_SEQUENCE)))       goto err;
+    if (!(s->qual_blk = cram_new_block2(EXTERNAL, DS_QS, CRAM_INNER_CONTENT_QUALITY_SCORES)))   goto err;
+    if (!(s->name_blk = cram_new_block2(EXTERNAL, DS_RN, CRAM_INNER_CONTENT_NAMES)))   goto err;
+    if (!(s->aux_blk  = cram_new_block2(EXTERNAL, DS_aux, CRAM_INNER_CONTENT_BLK)))  goto err;
+    if (!(s->base_blk = cram_new_block2(EXTERNAL, DS_IN, CRAM_INNER_CONTENT_BASE)))   goto err;
+    if (!(s->soft_blk = cram_new_block2(EXTERNAL, DS_SC, CRAM_INNER_CONTENT_SOFT_CLIP)))   goto err;
 
     s->features = NULL;
     s->nfeatures = s->afeatures = 0;
@@ -4796,12 +4889,12 @@ cram_slice *cram_read_slice(cram_fd *fd) {
     if (!(s->cigar = malloc(s->cigar_alloc * sizeof(*s->cigar)))) goto err;
     s->ncigar = 0;
 
-    if (!(s->seqs_blk = cram_new_block(EXTERNAL, 0)))      goto err;
-    if (!(s->qual_blk = cram_new_block(EXTERNAL, DS_QS)))  goto err;
-    if (!(s->name_blk = cram_new_block(EXTERNAL, DS_RN)))  goto err;
-    if (!(s->aux_blk  = cram_new_block(EXTERNAL, DS_aux))) goto err;
-    if (!(s->base_blk = cram_new_block(EXTERNAL, DS_IN)))  goto err;
-    if (!(s->soft_blk = cram_new_block(EXTERNAL, DS_SC)))  goto err;
+    if (!(s->seqs_blk = cram_new_block2(EXTERNAL, 0, CRAM_INNER_CONTENT_SEQUENCE)))       goto err;
+    if (!(s->qual_blk = cram_new_block2(EXTERNAL, DS_QS, CRAM_INNER_CONTENT_QUALITY_SCORES)))   goto err;
+    if (!(s->name_blk = cram_new_block2(EXTERNAL, DS_RN, CRAM_INNER_CONTENT_NAMES)))   goto err;
+    if (!(s->aux_blk  = cram_new_block2(EXTERNAL, DS_aux, CRAM_INNER_CONTENT_BLK)))  goto err;
+    if (!(s->base_blk = cram_new_block2(EXTERNAL, DS_IN, CRAM_INNER_CONTENT_BASE)))   goto err;
+    if (!(s->soft_blk = cram_new_block2(EXTERNAL, DS_SC, CRAM_INNER_CONTENT_SOFT_CLIP)))   goto err;
 
     s->crecs = NULL;
 
@@ -5172,7 +5265,7 @@ int cram_write_SAM_hdr(cram_fd *fd, sam_hdr_t *hdr) {
             return -1;
     } else {
         /* Create block(s) inside a container */
-        cram_block *b = cram_new_block(FILE_HEADER, 0);
+        cram_block *b = cram_new_block2(FILE_HEADER, 0, CRAM_INNER_CONTENT_OTHER);
         cram_container *c = cram_new_container(0, 0);
         int padded_length;
         char *pads;
@@ -5841,6 +5934,12 @@ int cram_close(cram_fd *fd) {
 
     free(fd);
 
+    int zdict_write = write_zdicts();
+    if (zdict_write < 0) {
+        hts_log_warning("Failed to write ZSTD dictionaries");
+        ret = -1;
+    }
+        
     #ifdef HAVE_LIBZSTD
     if (zstd_cctx)
         ZSTD_freeCCtx(zstd_cctx);
@@ -5849,6 +5948,7 @@ int cram_close(cram_fd *fd) {
         ZSTD_freeDCtx(zstd_dctx);
     zstd_dctx = NULL;
     #endif
+    
 
     return ret;
 }
@@ -5953,11 +6053,82 @@ int cram_set_voption(cram_fd *fd, enum hts_fmt_option opt, va_list args) {
         fd->use_zstd = va_arg(args, int);
         break;
 
-    case CRAM_OPT_ZSTD_DICTIONARY: {
+    /*case CRAM_OPT_ZSTD_DICTIONARY: {
         char* dict = va_arg(args, char *);
         if (dict) {
             fd->zstd_dict = strdup(dict);
             if (!fd->zstd_dict)
+                return -1;
+        }
+    }*/
+    
+     case CRAM_OPT_BASES_ZSTD_DICTIONARY: {
+        char* dict = va_arg(args, char *);
+
+        if (dict) {
+
+
+            if(fd->dicts == NULL) {
+                fd->dicts = calloc(1, sizeof(*fd->dicts));
+                if (fd->dicts == NULL)
+                    return -1;
+            }
+            
+            free(fd->dicts->soft_clip);  // Free the old value if any
+            fd->dicts->soft_clip = strdup(dict);
+            if (!fd->dicts->soft_clip)
+                return -1;
+        }
+
+    }
+
+   case CRAM_OPT_NAMES_ZSTD_DICTIONARY: {
+        char* dict = va_arg(args, char *);
+
+        if (dict) {
+            if(fd->dicts == NULL) {
+                fd->dicts = calloc(1, sizeof(*fd->dicts));
+                if (fd->dicts == NULL)
+                    return -1;
+            }
+            free(fd->dicts->names);  // Free the old value if any
+            fd->dicts->names = strdup(dict);
+            if (!fd->dicts->names)
+                return -1;
+        }
+
+    }
+
+
+
+    case CRAM_OPT_QUAL_ZSTD_DICTIONARY: {
+        char* dict = va_arg(args, char *);
+
+        if (dict) {
+            if(fd->dicts == NULL) {
+                fd->dicts = calloc(1, sizeof(*fd->dicts));
+                if (fd->dicts == NULL)
+                    return -1;
+            }
+            free(fd->dicts->qual);  // Free the old value if any
+            fd->dicts->qual = strdup(dict);
+            if (!fd->dicts->qual)
+                return -1;
+        }
+    }
+
+    case CRAM_OPT_SOFT_CLIP_ZSTD_DICTIONARY: {
+        char* dict = va_arg(args, char *);
+
+        if (dict) {
+            if(fd->dicts == NULL) {
+                fd->dicts = calloc(1, sizeof(*fd->dicts));
+                if (fd->dicts == NULL)
+                    return -1;
+            }
+            free(fd->dicts->soft_clip);  // Free the old value if any
+            fd->dicts->soft_clip = strdup(dict);
+            if (!fd->dicts->soft_clip)
                 return -1;
         }
     }

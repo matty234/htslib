@@ -313,6 +313,7 @@ KHASH_MAP_INIT_INT(m_metrics, cram_metrics*)
 struct cram_block {
     enum cram_block_method_int  method, orig_method;
     enum cram_content_type  content_type;
+    enum cram_inner_content inner_content_type;
     int32_t  content_id;
     int32_t  comp_size;
     int32_t  uncomp_size;
@@ -779,6 +780,13 @@ typedef struct varint_vec {
     int (*varint_size)(int64_t val);
 } varint_vec;
 
+typedef struct zstd_dicts {
+    char* bases;
+    char* names;
+    char* qual;
+    char* soft_clip;
+} zstd_dicts;
+
 struct cram_fd {
     struct hFILE  *fp;
     int            mode;     // 'r' or 'w'
@@ -886,7 +894,7 @@ struct cram_fd {
     // in delta between them.  (Ideal would be a per read setting.)
     int ap_delta;
 
-    char    *zstd_dict;
+    zstd_dicts *dicts;
 };
 
 // Translation of required fields to cram data series
